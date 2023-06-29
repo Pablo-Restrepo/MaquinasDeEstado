@@ -1,4 +1,4 @@
-# Multitarea (Luz, Temperatura y Humedad)
+# Maquinas de Estado
 
 ## Como Ejecutarlo
 
