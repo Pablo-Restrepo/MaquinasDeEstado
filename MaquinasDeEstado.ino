@@ -17,6 +17,7 @@
 #include "DHTStable.h"     // Biblioteca para el sensor DHT
 #include <LiquidCrystal.h> // Biblioteca para la pantalla LCD
 #include <Keypad.h>
+#include "StateMachineLib.h"
 
 // Definir el tamaño del teclado
 const byte ROWS = 4;
@@ -73,28 +74,37 @@ void readTemperatureAndHumedity(); // Declaracion de los metodos para las multit
 void readLight();
 void readPassword();
 void systemLocked();
+void readHall();
+void readMetalTouch();
+void readTracking();
 
 AsyncTask asyncTaskReadTemperatureAndHumedity(2000, true, readTemperatureAndHumedity); // Tarea asíncrona para leer temperatura y humedad cada 2 segundos
 AsyncTask asyncTaskReadLight(4000, true, readLight);                                   // Tarea asíncrona para leer la luz cada 4 segundos
 AsyncTask asyncTaskReadPassword(100, true, readPassword);
 AsyncTask asyncTaskSystemLocked(100, true, systemLocked);
+AsyncTask asyncTaskReadHall(100, true, readHall);
+AsyncTask asyncTaskReadMetalTouch(100, true, readMetalTouch);
+AsyncTask asyncTaskReadTracking(100, true, readTracking);
 
-enum Estado
+enum State
 {
-    Inicio,
-    Monitoreo,
-    MonitoreoPuertasVentanas,
-    Alarma,
-    SistemaBloqueado
+    Inicio = 0,
+    Monitoreo = 1,
+    MonitoreoPuertasVentanas = 2,
+    Alarma = 3,
+    SistemaBloqueado = 4
 };
 
-enum Entrada
+enum Input
 {
-    Desconocida,
-    Configurar,
-    Monitorear,
-    TemperaturaCaliente,
+    Reset = 0,
+    Forward = 1,
+    Backward = 2,
+    Unknown = 3,
 };
+
+StateMachine stateMachine(4, 9);
+Input input;
 
 const int buzzerPin = 7; // the buzzer pin attach to
 int fre;                 // set the variable to store the frequence value
@@ -106,7 +116,6 @@ int fre;                 // set the variable to store the frequence value
 */
 void setup()
 {
-
     pinMode(buzzerPin, OUTPUT);
     lcd.begin(16, 2);
     Serial.begin(9600);
@@ -114,6 +123,9 @@ void setup()
     asyncTaskReadTemperatureAndHumedity.Start();
     asyncTaskReadLight.Start();
     asyncTaskSystemLocked.Start();
+    asyncTaskReadHall.Start();
+    asyncTaskReadMetalTouch.Start();
+    asyncTaskReadTracking.Start();
 }
 
 /**
@@ -312,4 +324,16 @@ void systemLocked()
     lcd.clear();
     lcd.print("Siste. Bloqueado");
     exit(0);
+}
+
+void readHall()
+{
+}
+
+void readMetalTouch()
+{
+}
+
+void readTracking()
+{
 }
