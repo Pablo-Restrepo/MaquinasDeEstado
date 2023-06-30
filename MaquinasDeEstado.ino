@@ -1,16 +1,18 @@
 /**
-   Integrantes:
-
-   Fabian Ome Peña
-   Carlos Mario Perdomo Ramos
-   Pablo Jose Restrepo Ruiz
-
-   Arquitectura Computacional - Universidad del Cauca
-
-   Fuentes:
-    Photoresistor: https://learn.sunfounder.com/lesson-21-photoresistor-sensor/
-    Humiture Sensor: https://learn.sunfounder.com/lesson-22-humiture-sensor/
-*/
+ * @file MaquinasDeEstado.ino
+ *
+ * @brief Descripción general del programa.
+ *
+ * Este programa realiza diversas funciones como leer sensores de temperatura, humedad y luz,
+ * controlar una alarma, y administrar un sistema de seguridad basado en una contraseña.
+ *
+ * Integrantes:
+ * - Fabian Ome Peña
+ * - Carlos Mario Perdomo Ramos
+ * - Pablo Jose Restrepo Ruiz
+ *
+ * Arquitectura Computacional - Universidad del Cauca
+ */
 
 // Incluir las bibliotecas necesarias:
 #include "AsyncTaskLib.h"  // Biblioteca para tareas asíncronas
@@ -37,22 +39,28 @@ byte colPins[COLS] = {47, 49, 51, 53};
 // Crear una instancia de Keypad con los parámetros anteriores
 Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 
-// Contraseña esperada: 1234
-char password[8] = {'1', '2', '3', '4'};
+// Leds
+const int redPin = 21;
+const int bluePin = 20;
+const int greenPin = 19;
 
-// Contraseña ingresada por el usuario
-char inputPassword[8];
-
-// Índice actual para ingresar la contraseña
-unsigned char idx = 0;
-
-// Número de intentos de contraseña fallidos
+// Contrasenia
+char password[5] = "1234";
+char contraIngre[5];
+int longiCadena = 0;
 int attempts = 0;
+boolean passwordCorrect = false;
 
+// Variables varias
 int varAlar = 0;
+int tempInicio = 0;
+int tempFinal = 0;
+int outputValue = 0;
+int contadorAlarma = 0;
 
-// Bandera para indicar si se han realizado tres intentos fallidos consecutivos
-boolean threeAttempts = false;
+// el pin del zumbador se conecta aquí
+const int buzzerPin = 7;
+int fre;
 
 // Definir los pines del Arduino conectados a la pantalla LCD
 const int rs = 12, en = 11, d4 = 5, d5 = 4, d6 = 3, d7 = 2;
@@ -60,7 +68,7 @@ const int rs = 12, en = 11, d4 = 5, d5 = 4, d6 = 3, d7 = 2;
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
 
 DHTStable DHT;
-#define DHT11_PIN 6 // Pin al que esta conectado el SDA del sensor DHT11 al Arduino (pin 6)
+#define DHT11_PIN 6 // Pin al que está conectado el SDA del sensor DHT11 al Arduino (pin 6)
 #define DEBUG(a)            \
     Serial.print(millis()); \
     Serial.print(": ");     \
@@ -68,24 +76,22 @@ DHTStable DHT;
 
 const int photocellPin = A0; // Pin analógico conectado al fotocélula
 const int ledPin = 13;       // Pin del LED
-int outputValue = 0;         // Valor de salida del fotocélula
 
-void readTemperatureAndHumedity(); // Declaracion de los metodos para las multitareas
-void readLight();
-void readPassword();
-void systemLocked();
-void readHall();
-void readMetalTouch();
-void readTracking();
+// Declaración de funciones
+void temporizador();
+void readTemperatureAndHumedity();
+void timeoutg();
+void time20s();
 
-AsyncTask asyncTaskReadTemperatureAndHumedity(2000, true, readTemperatureAndHumedity); // Tarea asíncrona para leer temperatura y humedad cada 2 segundos
-AsyncTask asyncTaskReadLight(4000, true, readLight);                                   // Tarea asíncrona para leer la luz cada 4 segundos
-AsyncTask asyncTaskReadPassword(100, true, readPassword);
-AsyncTask asyncTaskSystemLocked(100, true, systemLocked);
-AsyncTask asyncTaskReadHall(100, true, readHall);
-AsyncTask asyncTaskReadMetalTouch(100, true, readMetalTouch);
-AsyncTask asyncTaskReadTracking(100, true, readTracking);
+// Tareas asíncronas
+AsyncTask asyncTaskTemporizador(5000, false, temporizador);
+AsyncTask asyncTasktime20s(10000, false, time20s);
+AsyncTask asyncTasktime2I5s(2500, false, timeoutg);
+AsyncTask asyncTasktime1I5s(1500, false, timeoutg);
+AsyncTask asyncTaskTemp(1000, true, readTemperatureAndHumedity);
+AsyncTask asyncTasktime5s(5000, true, timeoutg);
 
+// Definición de los estados posibles
 enum State
 {
     Inicio = 0,
@@ -95,59 +101,153 @@ enum State
     SistemaBloqueado = 4
 };
 
+// Definición de las entradas posibles
 enum Input
 {
-    Reset = 0,
-    Forward = 1,
-    Backward = 2,
-    Unknown = 3,
+    Unknown = 0,
+    contraseCorrecta = 1,
+    sisBloqueado = 2,
+    tempover = 3,
+    timeout = 4,
+    tempoverandto = 5,
+    asterisco = 6,
+    evento = 7
 };
 
-StateMachine stateMachine(4, 9);
+// Configuración de stateMachine e input value
+StateMachine stateMachine(5, 11);
 Input input;
-
-const int buzzerPin = 7; // the buzzer pin attach to
-int fre;                 // set the variable to store the frequence value
+Input currentInput = Input::Unknown;
 
 /**
-  @brief Configura la configuración inicial del programa.
-  @details Este metodo inicializa la pantalla LCD, inicia la comunicación serial y ejecuta tareas asíncronas para leer la temperatura y humedad, así como para leer la luz.
-  @details La pantalla LCD se configura con un tamaño de 16x2 caracteres. La comunicación serial se establece a una velocidad de baudios de 9600.
-*/
+ * @brief Configura la configuración inicial del programa.
+ *
+ * Este metodo inicializa la pantalla LCD, inicia la comunicación serial y ejecuta tareas asíncronas para
+ * leer la temperatura y humedad, así como para leer la luz.
+ *
+ * La pantalla LCD se configura con un tamaño de 16x2 caracteres. La comunicación serial se establece a
+ * una velocidad de baudios de 9600.
+ */
 void setup()
 {
     pinMode(buzzerPin, OUTPUT);
+    pinMode(redPin, OUTPUT);
+    pinMode(greenPin, OUTPUT);
+    pinMode(bluePin, OUTPUT);
     lcd.begin(16, 2);
     Serial.begin(9600);
-    asyncTaskReadPassword.Start();
-    asyncTaskReadTemperatureAndHumedity.Start();
-    asyncTaskReadLight.Start();
-    asyncTaskSystemLocked.Start();
-    asyncTaskReadHall.Start();
-    asyncTaskReadMetalTouch.Start();
-    asyncTaskReadTracking.Start();
+
+    Serial.println("Starting State Machine...");
+    setupStateMachine();
+    Serial.println("Start Machine Started");
+
+    stateMachine.SetState(Inicio, false, true);
 }
 
 /**
-  @brief Metodo principal del programa que se ejecuta en un ciclo infinito.
-  @details Este metodo se ejecuta en un bucle infinito y actualiza las tareas asíncronas de lectura de temperatura y humedad, así como de lectura de luz.
-*/
+ * @brief Metodo principal del programa que se ejecuta en un ciclo infinito.
+ *
+ * Este metodo se ejecuta en un bucle infinito y actualiza las tareas asíncronas de lectura de temperatura
+ * y humedad, así como de lectura de luz.
+ */
 void loop()
 {
-    asyncTaskReadPassword.Update();
-    asyncTaskReadTemperatureAndHumedity.Update();
-    asyncTaskReadLight.Update();
+    input = static_cast<Input>(readInput());
+    asyncTaskTemp.Update();
+    asyncTasktime5s.Update();
+    asyncTasktime20s.Update();
+    asyncTasktime2I5s.Update();
+    asyncTasktime1I5s.Update();
+    asyncTaskTemporizador.Update();
+    stateMachine.Update();
 }
 
 /**
-  @brief Lee la temperatura y humedad del sensor DHT11.
-  @details Este metodo lee la temperatura y humedad del sensor DHT11 y muestra los valores por el puerto serial y en la pantalla LCD.
-*/
+ * @brief Aplicación de seguridad y monitoreo con Arduino.
+ *
+ * Este programa implementa un sistema de seguridad y monitoreo utilizando Arduino y varios componentes,
+ * como un sensor DHT11 para medir temperatura y humedad, una pantalla LCD para mostrar información, un teclado
+ * matricial para la entrada de contraseñas y un fotocélula para detectar cambios en la luminosidad.
+ * El sistema consta de varios estados y se controla mediante una máquina de estados finitos.
+ */
+int readInput()
+{
+    Input currentInput = Input::Unknown;
+    char key = keypad.getKey();
+
+    if (stateMachine.GetState() == MonitoreoPuertasVentanas)
+    {
+        if (key == '*')
+        {
+            asyncTaskTemp.Stop();
+            asyncTasktime5s.Stop();
+            asyncTasktime20s.Stop();
+            asyncTasktime1I5s.Stop();
+            asyncTasktime2I5s.Stop();
+            attempts = 0;
+            currentInput = Input::asterisco;
+        }
+    }
+
+    if (attempts >= 3)
+    {
+        currentInput = Input::sisBloqueado;
+    }
+
+    if (!passwordCorrect)
+    {
+        if (key)
+        {
+            asyncTaskTemporizador.Start();
+            if (key == '#')
+            {
+                asyncTaskTemporizador.Stop();
+                if (isPasswordCorrect())
+                {
+                    color(0, 255, 0);
+                    lcd.clear();
+                    lcd.setCursor(0, 0);
+                    lcd.print("Clave Correcta!");
+                    delay(2000);
+                    passwordCorrect = true;
+                    currentInput = Input::contraseCorrecta;
+                    lcd.clear();
+                }
+                else
+                {
+                    lcd.clear();
+                    lcd.setCursor(0, 0);
+                    lcd.print("Clave Incorrecta!");
+                    delay(2000);
+                    attempts++;
+                    inputSecuritySystem();
+                }
+
+                for (int i = 0; i < 5; i++)
+                {
+                    contraIngre[i] = NULL;
+                }
+            }
+            else
+            {
+                contraIngre[longiCadena++] = key;
+                lcd.print("*");
+            }
+        }
+    }
+    return static_cast<int>(currentInput);
+}
+
+/**
+ * @brief Lee la temperatura y humedad del sensor DHT11.
+ *
+ * Este metodo lee la temperatura y humedad del sensor DHT11 y muestra los valores por el puerto serial
+ * y en la pantalla LCD.
+ */
 void readTemperatureAndHumedity()
 {
-    int chk = DHT.read22(DHT11_PIN);
-    // int chk = DHT.read11(DHT11_PIN);
-
+    // int chk = DHT.read22(DHT11_PIN);
+    int chk = DHT.read11(DHT11_PIN);
     Serial.print("Estado:\tHumedad (%):\tTemperatura (C):");
     Serial.print("\n");
 
@@ -173,167 +273,224 @@ void readTemperatureAndHumedity()
     Serial.print("\t\t");
     Serial.print("\n");
 
+    color(0, 0, 255);
+    outputValue = analogRead(photocellPin);
     lcd.clear();
     lcd.setCursor(0, 0);
-    lcd.print("Humedad:");
-    lcd.setCursor(9, 0);
+    lcd.print("Hum:");
+    lcd.setCursor(4, 0);
     lcd.print(DHT.getHumidity());
+    lcd.setCursor(9, 0);
+    lcd.print("Luz:");
+    lcd.print(outputValue);
     lcd.setCursor(0, 1);
     lcd.print("Temp:");
-    lcd.setCursor(6, 1);
+    lcd.setCursor(5, 1);
     lcd.print(DHT.getTemperature());
-    delay(2000);
 
     if (DHT.getTemperature() > 32)
     {
-        alarma();
+        tone(buzzerPin, 800);
+        input = Input::tempover;
     }
     else
     {
-        varAlar = 0;
+        asyncTasktime20s.Stop();
+        contadorAlarma = 0;
+        noTone(buzzerPin);
     }
 }
 
 /**
-  @brief Lee la intensidad de luz del sensor de luz.
-  @details Este metodo lee la intensidad de luz del sensor de luz y muestra el valor por el puerto serial y en la pantalla LCD.
-*/
-void readLight()
+ * @brief Configura la máquina de estados y define las transiciones y acciones correspondientes a cada estado.
+ */
+void setupStateMachine()
 {
-    outputValue = analogRead(photocellPin);
+    stateMachine.AddTransition(Inicio, Monitoreo, []()
+                               { return input == contraseCorrecta; });
+    stateMachine.AddTransition(Inicio, SistemaBloqueado, []()
+                               { return input == sisBloqueado; });
 
-    Serial.println("Luminosidad:");
-    Serial.println(outputValue);
+    stateMachine.AddTransition(Monitoreo, Alarma, []()
+                               { return input == tempover; });
+    stateMachine.AddTransition(Monitoreo, MonitoreoPuertasVentanas, []()
+                               { return input == timeout; });
+    stateMachine.AddTransition(Monitoreo, SistemaBloqueado, []()
+                               { return input == tempoverandto; });
 
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Luminosidad:");
-    lcd.setCursor(0, 1);
-    lcd.print(outputValue);
+    stateMachine.AddTransition(Alarma, SistemaBloqueado, []()
+                               { return input == tempoverandto; });
+    stateMachine.AddTransition(Alarma, Monitoreo, []()
+                               { return input == timeout; });
+
+    stateMachine.AddTransition(SistemaBloqueado, MonitoreoPuertasVentanas, []()
+                               { return input == timeout; });
+
+    stateMachine.AddTransition(MonitoreoPuertasVentanas, Inicio, []()
+                               { return input == asterisco; });
+    stateMachine.AddTransition(MonitoreoPuertasVentanas, Monitoreo, []()
+                               { return input == timeout; });
+    stateMachine.AddTransition(MonitoreoPuertasVentanas, SistemaBloqueado, []()
+                               { return input == evento; });
+
+    stateMachine.SetOnEntering(Inicio, inputSecuritySystem);
+    stateMachine.SetOnEntering(Monitoreo, inputDHT);
+    stateMachine.SetOnEntering(Alarma, inputAlarma);
+    stateMachine.SetOnEntering(SistemaBloqueado, inputSistemaBloqueado);
+    stateMachine.SetOnEntering(MonitoreoPuertasVentanas, inputMonitoreoPuertasVentanas);
+
+    stateMachine.SetOnLeaving(Inicio, []()
+                              { Serial.println("Leaving Inicio"); });
+    stateMachine.SetOnLeaving(Monitoreo, []()
+                              { Serial.println("Leaving Monitoreo"); });
+    stateMachine.SetOnLeaving(Alarma, []()
+                              { Serial.println("Leaving Alarma"); });
+    stateMachine.SetOnLeaving(MonitoreoPuertasVentanas, []()
+                              { Serial.println("Leaving MonitoreoPuertasVentanas"); });
+    stateMachine.SetOnLeaving(SistemaBloqueado, []()
+                              { Serial.println("Leaving SistemaBloqueado"); });
 }
 
-void alarma()
+/**
+ * @brief Cambia el color de los LEDs RGB.
+ *
+ * @param red   Valor de intensidad para el LED rojo (0-255).
+ * @param green Valor de intensidad para el LED verde (0-255).
+ * @param blue  Valor de intensidad para el LED azul (0-255).
+ */
+void color(unsigned char red, unsigned char green, unsigned char blue)
 {
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Alarma:");
-    lcd.setCursor(0, 1);
-    lcd.print("Temp mayor a 32C");
-    for (int j = 0; j <= 4; j++)
-    {
-        for (int i = 200; i <= 800; i += 10) // Incremento de 10 en lugar de 1 para un cambio más rápido de frecuencia
-        {
-            tone(7, i); // Generar tono en el pin 7 con frecuencia i
-            delay(9);   // Pequeña pausa para cada frecuencia
-        }
-        for (int i = 800; i >= 200; i -= 10) // Decremento de 10 en lugar de 1 para un cambio más rápido de frecuencia
-        {
-            tone(7, i); // Generar tono en el pin 7 con frecuencia i
-            delay(9);   // Pequeña pausa para cada frecuencia
-        }
-        noTone(7); // Detener el tono al final de la alarma
-    }
-    varAlar++;
-    if (varAlar >= 4)
-    {
-        asyncTaskSystemLocked.Update();
-    }
+    analogWrite(redPin, red);
+    analogWrite(bluePin, blue);
+    analogWrite(greenPin, green);
 }
 
-void readPassword()
+/**
+ * @brief Realiza una acción cuando se alcanza el tiempo límite de 20 segundos.
+ */
+void time20s()
 {
-    char key = keypad.getKey();
-    boolean bandera = true;
-    reset();
-    while (true)
+    input = Input::tempoverandto;
+    if (stateMachine.GetState() == SistemaBloqueado)
     {
-        if (attempts >= 3)
-        {
-            asyncTaskSystemLocked.Update();
-        }
-        if (key)
-        {
-            if (key == '#')
-            {
-                if (isPasswordCorrect())
-                {
-                    print("Clave Correcta!");
-                    attempts = 0;
-                    return;
-                }
-                print("Clave Incorrecta!");
-                attempts++;
-                bandera = false;
-            }
-            if (idx >= 8)
-            {
-                print("Fuera de Rango!");
-                bandera = false;
-            }
-            if (bandera)
-            {
-                inputPassword[idx] = key;
-                lcd.print('*');
-                idx++;
-                (idx >= 8) ? idx : 0;
-            }
-            bandera = true;
-        }
-        key = keypad.getKey(); // Obtener una nueva tecla en cada iteración
+        input = Input::timeout;
     }
 }
 
 /**
-   Imprime un mensaje en el LCD y restablece los valores.
+ * @brief Realiza una acción cuando se alcanza el tiempo límite de timeout.
+ */
+void timeoutg()
+{
+    input = Input::timeout;
+}
 
-   @param Message El mensaje a imprimir en el LCD.
-*/
-void print(String Message)
+/**
+ * @brief Función de temporizador que se ejecuta cuando se detecta una clave incorrecta.
+ */
+void temporizador()
 {
     lcd.clear();
-    lcd.print(Message);
+    lcd.setCursor(0, 0);
+    lcd.print("Clave Incorrecta!");
     delay(2000);
-    lcd.clear();
-    reset();
+    inputSecuritySystem();
+    tempInicio = 0;
+    tempFinal = 0;
+    attempts++;
 }
 
 /**
-   Verifica si la contraseña ingresada es correcta.
+ * @brief Realiza una acción al ingresar al estado de Security System.
+ */
+void inputSecuritySystem()
+{
+    Serial.println("Entering SecuritySystem");
+    passwordCorrect = false;
+    longiCadena = 0;
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Ingrese Clave:");
+    lcd.setCursor(0, 1);
+    color(0, 0, 0);
+}
 
-   @return true si la contraseña es correcta, false de lo contrario.
-*/
+/**
+ * @brief Realiza una acción al ingresar al estado de Alarma.
+ */
+void inputAlarma()
+{
+    Serial.println("Entering Alarma");
+    color(255, 0, 0);
+    asyncTasktime5s.Start();
+    if (contadorAlarma == 0)
+    {
+        asyncTasktime20s.Start();
+    }
+    contadorAlarma++;
+    tone(buzzerPin, 800);
+    color(255, 0, 0);
+}
+
+/**
+ * @brief Realiza una acción al ingresar al estado de Monitoreo DHT.
+ */
+void inputDHT()
+{
+    Serial.println("Entering MonitoreoDHT");
+    asyncTaskTemp.Start();
+    asyncTasktime2I5s.Start();
+}
+
+/**
+ * @brief Realiza una acción al ingresar al estado de Sistema Bloqueado.
+ */
+void inputSistemaBloqueado()
+{
+    Serial.println("Entering SistemaBloqueado");
+    color(255, 0, 0);
+    asyncTaskTemp.Stop();
+    asyncTasktime5s.Stop();
+    asyncTasktime1I5s.Stop();
+    asyncTasktime2I5s.Stop();
+    contadorAlarma = 0;
+    noTone(buzzerPin);
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("SistemaBloqueado");
+    asyncTasktime20s.Stop();
+    asyncTasktime20s.Start();
+}
+
+/**
+ * @brief Realiza una acción al ingresar al estado de Monitoreo de Puertas y Ventanas.
+ */
+void inputMonitoreoPuertasVentanas()
+{
+    Serial.println("Entering MonitoreoPuertasVentanas");
+    color(0, 0, 255);
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("PuertasYVentanas");
+    delay(2000);
+}
+
+/**
+ * @brief Verifica si la contraseña ingresada es correcta.
+ *
+ * @return true si la contraseña es correcta, false de lo contrario.
+ */
 bool isPasswordCorrect()
 {
-    return strcmp(inputPassword, password) == 0;
+    return strcmp(contraIngre, password) == 0;
 }
 
 /**
-   Restablece los valores y muestra un mensaje en el LCD.
-*/
-void reset()
-{
-    memset(inputPassword, 0, sizeof(inputPassword));
-    idx = 0;
-    lcd.setCursor(0, 0);
-    lcd.print("Ingrese clave:");
-    lcd.setCursor(0, 1);
-}
-
+ * @brief Bloquea el sistema y muestra un mensaje en la pantalla LCD.
+ */
 void systemLocked()
 {
     lcd.clear();
-    lcd.print("Siste. Bloqueado");
+    lcd.print("Sis. Bloqueado");
     exit(0);
-}
-
-void readHall()
-{
-}
-
-void readMetalTouch()
-{
-}
-
-void readTracking()
-{
 }
