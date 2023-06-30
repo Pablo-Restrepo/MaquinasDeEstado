@@ -88,7 +88,7 @@ AsyncTask asyncTaskTemporizador(5000, false, temporizador);
 AsyncTask asyncTasktime20s(10000, false, time20s);
 AsyncTask asyncTasktime2I5s(2500, false, timeoutg);
 AsyncTask asyncTasktime1I5s(1500, false, timeoutg);
-AsyncTask asyncTaskTemp(1000, true, readTemperatureAndHumedity);
+AsyncTask asyncTaskTemp(2000, true, readTemperatureAndHumedity);
 AsyncTask asyncTasktime5s(5000, true, timeoutg);
 
 // Definición de los estados posibles
@@ -288,8 +288,11 @@ void readTemperatureAndHumedity()
     lcd.setCursor(5, 1);
     lcd.print(DHT.getTemperature());
 
-    if (DHT.getTemperature() > 32)
+    int temp = DHT.getTemperature();
+
+    if (temp > 32)
     {
+        color(255, 0, 0);
         tone(buzzerPin, 800);
         input = Input::tempover;
     }
